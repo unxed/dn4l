@@ -103,7 +103,9 @@
 // Key constants
 #define Uses_TKeys
 
+#define Uses_MsgBox
 #include <tvision/tv.h>
+#include <sys/stat.h>
 
 
 class TDoublePanelWindow; 

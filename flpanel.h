@@ -89,6 +89,7 @@
 #define Uses_TEvent
 #define Uses_TRect
 #define Uses_TDrawBuffer
+#define Uses_MsgBox
 #define Uses_opstream 
 #define Uses_ipstream 
 #include <tvision/tv.h>
