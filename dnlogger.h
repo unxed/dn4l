@@ -102,7 +102,7 @@ private:
     std::string getTimestamp();
 
 public:
-    Logger(const std::string& filePath = "dn3l.log");
+    Logger(const std::string& filePath = "dn4l.log");
     ~Logger();
 
     void log(const std::string& message);
