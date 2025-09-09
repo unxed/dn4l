@@ -1,0 +1,13 @@
+diff --git a/source/platform/termio.cpp b/source/platform/termio.cpp
+index df6ec79..e5dd32a 100644
+--- a/source/platform/termio.cpp
++++ b/source/platform/termio.cpp
+@@ -284,7 +284,7 @@ void TermIO::keyModsOn(ConsoleCtl &con) noexcept
+         "\x1B[?2004s"   // Save bracketed paste.
+         "\x1B[?2004h"   // Enable bracketed paste.
+         "\x1B[>4;1m"    // Enable modifyOtherKeys (XTerm).
+-        "\x1B[>1u"      // Disambiguate escape codes (Kitty).
++        "\x1B[>31u"     // Disambiguate escape codes (Kitty).
+         "\x1B[?9001h"   // Enable win32-input-mode (Conpty).
+         far2lEnableSeq  // Enable far2l terminal extensions.
+     );
