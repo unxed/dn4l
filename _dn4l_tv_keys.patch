@@ -1,13 +1,83 @@
-diff --git a/source/platform/termio.cpp b/source/platform/termio.cpp
-index df6ec79..e5dd32a 100644
---- a/source/platform/termio.cpp
-+++ b/source/platform/termio.cpp
-@@ -284,7 +284,7 @@ void TermIO::keyModsOn(ConsoleCtl &con) noexcept
-         "\x1B[?2004s"   // Save bracketed paste.
-         "\x1B[?2004h"   // Enable bracketed paste.
-         "\x1B[>4;1m"    // Enable modifyOtherKeys (XTerm).
--        "\x1B[>1u"      // Disambiguate escape codes (Kitty).
-+        "\x1B[>31u"     // Disambiguate escape codes (Kitty).
-         "\x1B[?9001h"   // Enable win32-input-mode (Conpty).
-         far2lEnableSeq  // Enable far2l terminal extensions.
-     );
+diff --git a/include/tvision/compat/windows/windows.h b/include/tvision/compat/windows/windows.h
+index 4c62fd9..4a743c8 100644
+--- a/include/tvision/compat/windows/windows.h
++++ b/include/tvision/compat/windows/windows.h
+@@ -214,6 +214,18 @@ typedef unsigned int        UINT;
+ #define VK_PA1            0xFD
+ #define VK_OEM_CLEAR      0xFE
+ 
++#define VK_OEM_1          0xBA   // ';:' for US
++#define VK_OEM_PLUS       0xBB   // '+' any country
++#define VK_OEM_COMMA      0xBC   // ',' any country
++#define VK_OEM_MINUS      0xBD   // '-' any country
++#define VK_OEM_PERIOD     0xBE   // '.' any country
++#define VK_OEM_2          0xBF   // '/?' for US
++#define VK_OEM_3          0xC0   // '`~' for US
++#define VK_OEM_4          0xDB   //  '[{' for US
++#define VK_OEM_5          0xDC   //  '\|' for US
++#define VK_OEM_6          0xDD   //  ']}' for US
++#define VK_OEM_7          0xDE   //  ''"' for US
++
+ //
+ // Predefined Clipboard Formats
+ //
+diff --git a/source/platform/win32con.cpp b/source/platform/win32con.cpp
+index abed9d9..f1e4eee 100644
+--- a/source/platform/win32con.cpp
++++ b/source/platform/win32con.cpp
+@@ -464,7 +464,54 @@ bool getWin32Key(const KEY_EVENT_RECORD &KeyEvent, TEvent &ev, InputState &state
+             // If the character cannot be represented in the current codepage,
+             // or if it would accidentally trigger a Ctrl+Key combination,
+             // make the whole keyCode zero to avoid side effects.
+-            ev.keyDown.keyCode = kbNoKey;
++            {
++                // This breaks menu hotkeys in non-Latin kb layouts
++                //ev.keyDown.keyCode = kbNoKey;
++
++                // Let's use Latin char code detected from virtual key code
++                int latinKey = 0;
++
++                if (
++                    ((KeyEvent.wVirtualKeyCode >= 'A') && (KeyEvent.wVirtualKeyCode <= 'Z')) ||
++                    ((KeyEvent.wVirtualKeyCode >= '0') && (KeyEvent.wVirtualKeyCode <= '9'))
++                ) {
++
++                    latinKey = towlower(KeyEvent.wVirtualKeyCode);
++                }
++
++                switch (KeyEvent.wVirtualKeyCode) {
++
++                    // top row
++                    case VK_OEM_3:      latinKey = '`'; break;
++                    // ...digits...
++                    case VK_OEM_MINUS:  latinKey = '-'; break;
++                    case VK_OEM_PLUS:   latinKey = '+'; break;
++
++                    // second row
++                    // ...letters...
++                    case VK_OEM_4:      latinKey = '['; break;
++                    case VK_OEM_6:      latinKey = ']'; break;
++
++                    // third row
++                    // ...letters...
++                    case VK_OEM_1:      latinKey = ';'; break;
++                    case VK_OEM_7:      latinKey = '\''; break;
++                    case VK_OEM_5:      latinKey = '\\'; break;
++
++                    // forth row
++                    case 0xE1:          latinKey = '/'; break;
++                    // ...letters...
++                    case VK_OEM_COMMA:  latinKey = ','; break;
++                    case VK_OEM_PERIOD: latinKey = '.'; break;
++                    case VK_OEM_2:      latinKey = '/'; break;
++                }
++
++                if (latinKey) {
++                    ev.keyDown.keyCode = latinKey;
++                } else {
++                    ev.keyDown.keyCode = kbNoKey;
++                }
++            }
+     }
+ 
+     if ( ev.keyDown.keyCode == 0x2A00 || ev.keyDown.keyCode == 0x1D00 ||
