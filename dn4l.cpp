@@ -81,27 +81,44 @@
 //////////////////////////////////////////////////////////////////////////
 
 #include "dnapp.h"
-#include "dnlogger.h" // For global logger access
+#include "dnlogger.h"
+#include <iostream>
 
 int main() {
-    // Logger is already globally instantiated
-    logger.log("--------------------------------------------------");
-    logger.log("APPLICATION START");
-    logger.log("--------------------------------------------------");
+    // The Logger is a singleton, accessed via getInstance().
+    // This approach avoids the 'static initialization order fiasco'.
+    Logger::getInstance().log("--------------------------------------------------");
+    Logger::getInstance().log("APPLICATION START");
+    Logger::getInstance().log("--------------------------------------------------");
 
-    TDNApp app; // TDNApp constructor handles TV initialization via TProgInit
-    logger.log("TDNApp instance created, TProgInit should have run.");
+    try {
+        // The TDNApp constructor handles Turbo Vision initialization through TProgInit.
+        TDNApp app;
+        Logger::getInstance().log("TDNApp instance created, TProgInit should have run.");
 
-    app.run(); // Runs the application's event loop
-    logger.log("TDNApp::run() completed.");
+        // Run the application's main event loop. This blocks until the app exits.
+        app.run();
+        Logger::getInstance().log("TDNApp::run() completed.");
 
-    app.shutDown(); // Cleans up Turbo Vision resources
-    logger.log("TDNApp::shutDown() completed.");
-    logger.log("Application finished normally.");
-    logger.log("--------------------------------------------------");
-    logger.log("APPLICATION END");
-    logger.log("--------------------------------------------------");
+        // shutDown() is called automatically by TApplication's destructor.
+        // Calling it explicitly is not necessary but doesn't harm.
+        // app.shutDown();
+        Logger::getInstance().log("TDNApp has shut down.");
 
-    // Logger will be finalized by its own destructor when 'logger' goes out of scope (global)
+    } catch (const std::exception& e) {
+        // Catch any standard exceptions that might occur during initialization or runtime.
+        Logger::getInstance().log(std::format("FATAL EXCEPTION: {}", e.what()));
+        // Also print to stderr in case the logger itself failed.
+        std::cerr << "A fatal error occurred: " << e.what() << std::endl;
+        return 1;
+    }
+
+    Logger::getInstance().log("Application finished normally.");
+    Logger::getInstance().log("--------------------------------------------------");
+    Logger::getInstance().log("APPLICATION END");
+    Logger::getInstance().log("--------------------------------------------------");
+
+    // The Logger's destructor will be called automatically at program exit,
+    // closing the log file.
     return 0;
 }

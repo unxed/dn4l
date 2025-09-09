@@ -80,33 +80,18 @@
 //
 //////////////////////////////////////////////////////////////////////////
 
-#define Uses_TRect  // Ensure full definition is pulled by tv.h
-#define Uses_TPoint // Ensure full definition is pulled by tv.h
-#include <tvision/tv.h> // For TRect, TPoint definitions (includes objects.h)
+#define Uses_TRect
+#define Uses_TPoint
+#include <tvision/tv.h>
 
-#include "dnlogger.h" // Now logger.h can use the fully defined TRect/TPoint if needed by its own declarations
-                      // (though it uses forward declarations, its cpp implementation needs full defs)
+#include "dnlogger.h"
 
 #include <iostream>
-#include <iomanip>
 #include <chrono>
-#include <sstream>
-#include <sys/stat.h> 
 
-#ifdef _WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
-
-Logger logger; 
-
-// ... (rest of Logger implementation remains the same as the previous correct version) ...
-Logger::Logger(const std::string& filePath) : initialized(false), logFilePath(filePath), openFileError(false) {
-    openLogFile();
-    if (initialized) {
-        log("Logger initialized. Log file: " + logFilePath);
-    }
+Logger::Logger(const std::string& filePath)
+    : initialized(false), logFilePath(filePath), openFileError(false) {
+    // The log file is opened lazily on the first log attempt.
 }
 
 Logger::~Logger() {
@@ -119,100 +104,60 @@ Logger::~Logger() {
 }
 
 std::string Logger::getTimestamp() {
-    auto now = std::chrono::system_clock::now();
-    auto now_ms = std::chrono::time_point_cast<std::chrono::milliseconds>(now);
-    auto epoch = now_ms.time_since_epoch();
-    auto value = std::chrono::duration_cast<std::chrono::milliseconds>(epoch);
-    long millis = value.count() % 1000;
-
-    std::time_t tt = std::chrono::system_clock::to_time_t(now);
-    std::tm tm_buf;
-    #ifdef _WIN32
-        localtime_s(&tm_buf, &tt);
-        // std::tm& tm = tm_buf; // Not needed if using tm_buf directly
-    #else
-        std::tm* tm_ptr = std::localtime(&tt);
-        if (!tm_ptr) { 
-             return "YYYY-MM-DD HH:MM:SS.mmm";
-        }
-        tm_buf = *tm_ptr; // Copy to local stack variable
-    #endif
-
-    std::ostringstream oss;
-    oss << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S");
-    oss << '.' << std::setfill('0') << std::setw(3) << millis;
-    return oss.str();
+    // C++20 provides a much cleaner way to get a formatted timestamp.
+    const auto now = std::chrono::system_clock::now();
+    return std::format("{:%Y-%m-%d %H:%M:%S}", now);
 }
 
 void Logger::openLogFile() {
     if (initialized || openFileError) return;
+
     logFile.open(logFilePath, std::ios::app);
     if (!logFile.is_open()) {
+        // If the log file can't be opened, subsequent log calls will do nothing.
+        // An error is printed to stderr as a fallback.
         std::cerr << getTimestamp() << ": Error: Could not open log file: " << logFilePath << std::endl;
         openFileError = true;
         return;
     }
     initialized = true;
+    logFile << getTimestamp() << ": Logger initialized. Log file: " << logFilePath << std::endl;
 }
 
 void Logger::log(const std::string& message) {
-    if (!initialized && !openFileError) {
-        openLogFile(); 
-        if (initialized) {
-             logFile << getTimestamp() << ": Logger initialized (late). Log file: " << logFilePath << std::endl;
-        }
-    }
+    if (!initialized) openLogFile();
     if (initialized) {
         logFile << getTimestamp() << ": " << message << std::endl;
-        logFile.flush();
-    } else if (!openFileError) { 
-        std::cerr << getTimestamp() << ": Log attempt failed, logger not initialized and no open error: " << message << std::endl;
     }
 }
 
+// Specialization for std::string to add quotes.
 void Logger::log(const std::string& key, const std::string& value) {
-    log(key + ": \"" + value + "\"");
+    log(std::format("{}: \"{}\"", key, value));
 }
 
+// Specialization for TStringView.
 void Logger::log(const std::string& key, const TStringView& value) {
-    log(key + ": \"" + std::string(value.data(), value.size()) + "\"");
+    log(key, std::string(value.data(), value.size()));
 }
 
-void Logger::log(const std::string& key, int value) {
-    log(key + ": " + std::to_string(value));
-}
-
-void Logger::log(const std::string& key, unsigned int value) {
-    log(key + ": " + std::to_string(value));
-}
-
-void Logger::log(const std::string& key, long value) {
-    log(key + ": " + std::to_string(value));
-}
-
-void Logger::log(const std::string& key, unsigned long value) {
-    log(key + ": " + std::to_string(value));
-}
-
+// Specialization for bool.
 void Logger::log(const std::string& key, bool value) {
-    log(key + ": " + (value ? "True" : "False"));
+    log(std::format("{}: {}", key, value ? "True" : "False"));
 }
 
+// Specialization for pointers.
 void Logger::log(const std::string& key, const void* ptr) {
-    std::ostringstream oss;
-    oss << key << ": " << ptr;
-    log(oss.str());
+    log(std::format("{}: {}", key, ptr));
 }
 
+// Specialization for TRect.
 void Logger::log(const std::string& key, const TRect& r) {
-    std::ostringstream oss;
-    oss << key << ": TRect(A=(" << r.a.x << "," << r.a.y << "), B=(" << r.b.x << "," << r.b.y
-        << ")) Size=(" << (r.b.x - r.a.x) << "," << (r.b.y - r.a.y) << ")";
-    log(oss.str());
+    log(std::format("{}: TRect(A=({}, {}), B=({}, {}), Size=({}, {}))",
+        key, r.a.x, r.a.y, r.b.x, r.b.y, r.b.x - r.a.x, r.b.y - r.a.y));
 }
 
+// Specialization for TPoint.
 void Logger::log(const std::string& key, const TPoint& p) {
-    std::ostringstream oss;
-    oss << key << ": TPoint(X=" << p.x << ", Y=" << p.y << ")";
-    log(oss.str());
+    log(std::format("{}: TPoint(X={}, Y={})", key, p.x, p.y));
 }

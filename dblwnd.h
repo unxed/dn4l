@@ -85,23 +85,25 @@
 
 #define Uses_TWindow
 #define Uses_TRect
-#define Uses_TEvent 
-#define Uses_TKeys  
-#define Uses_TDrawBuffer // For TDoublePanelWindow::draw
+#define Uses_TEvent
+#define Uses_TKeys
+#define Uses_TDrawBuffer
 #include <tvision/tv.h>
 
-class TFilePanel;
+class TFilePanel; // Forward-declaration
 
 class TDoublePanelWindow : public TWindow {
 public:
+    // Pointers to the panels. Note: These are non-owning pointers.
+    // The TWindow base class (via TGroup) owns these views because they are
+    // 'insert'ed into it. The TWindow destructor will handle their deletion.
     TFilePanel* leftPanel;
     TFilePanel* rightPanel;
 
     TDoublePanelWindow(const TRect& bounds, TStringView title, short number);
-    ~TDoublePanelWindow() override;
-    
-    void draw() override; 
-    void handleEvent(TEvent& event) override; 
+
+    void draw() override;
+    void handleEvent(TEvent& event) override;
 };
 
 #endif // DBLWND_H

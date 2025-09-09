@@ -85,81 +85,54 @@
 
 #define Uses_TKeys
 #define Uses_TGroup
-#define Uses_TCollection
 #define Uses_TEvent
 #define Uses_TRect
 #define Uses_TDrawBuffer
 #define Uses_MsgBox
-#define Uses_opstream 
-#define Uses_ipstream 
 #include <tvision/tv.h>
-#include <ios> 
 
 #include <string>
 #include <vector>
+#include <filesystem>
+#include <memory>
 
-// Forward declaration
-class TFilePanel;
+// A type-safe enum to represent the kind of entry in the file list.
+enum class FileEntryType { File, Directory };
 
-struct TFileListItem {
-    std::string fileName;
-    bool isDirectory;
+struct FileEntry {
+    std::filesystem::path path;
+    FileEntryType type;
 
-    TFileListItem(const std::string& name, bool isDir);
-};
-
-class TFileListCollection : public TCollection {
-public:
-    TFileListCollection(ccIndex aLimit, ccIndex aDelta);
-    ~TFileListCollection() override;
-
-    TFileListItem* at(ccIndex index) {
-        return static_cast<TFileListItem*>(TCollection::at(index));
-    }
-    const TFileListItem* at(ccIndex index) const {
-         return static_cast<const TFileListItem*>(
-            const_cast<TCollection*>(static_cast<const TCollection*>(this))->at(index)
-        );
-    }
-
-    void insert(TFileListItem* item) {
-        TCollection::insert(static_cast<void*>(item));
-    }
-
-private:
-    void *readItem(ipstream& is) override { is.clear(std::ios_base::failbit); return nullptr; }
-    void writeItem(void *obj, opstream& os) override { (void)obj; (void)os; }
+    // Use an explicit constructor to prevent unintended conversions.
+    explicit FileEntry(std::filesystem::path p, FileEntryType t)
+        : path(std::move(p)), type(t) {}
 };
 
 class TFilePanel : public TGroup {
 public:
-    TFileListCollection* fileList;
-    std::string currentPath;
-    int focusedItemIndex;
-    int topItemIndex;
-
     TFilePanel(const TRect& bounds);
-    ~TFilePanel() override;
 
     void draw() override;
     void handleEvent(TEvent& event) override;
-    ushort getHelpCtx() override;
     void setState(ushort aState, Boolean enable) override;
 
+    // Public read-only access to the current path.
+    const std::filesystem::path& getCurrentPath() const { return currentPath; }
 
-    void loadDirectory(const std::string& path);
-    void setFocusIndex(int newFocusIndex);
+    // Reloads the file list from a given directory path.
+    void loadDirectory(const std::filesystem::path& path);
 
 private:
-    void drawItem(int y_in_client_area, int list_index, bool isFocusedOnItem, TDrawBuffer& b);
-    void changeDirectory(const std::string& newPath);
+    void drawItem(int y_in_client_area, size_t list_index, bool isFocused, TDrawBuffer& b);
+    void changeDirectory(const std::filesystem::path& newPathFragment);
     void executeFocusedItem();
+    void setFocusedIndex(size_t newIndex);
 
-    static char getPathSeparator();
-    static std::string ensureTrailingSeparator(const std::string& path);
-    static std::string getParentPath(const std::string& path);
-    static std::string getBaseName(const std::string& path);
-    static bool directoryExists(const std::string& path);
+    // Using unique_ptr to manage the lifetime of FileEntry objects automatically.
+    std::vector<std::unique_ptr<FileEntry>> fileList;
+    std::filesystem::path currentPath;
+    size_t focusedItemIndex = 0;
+    size_t topItemIndex = 0; // Index of the item displayed at the top of the panel.
 };
 
 #endif // FLPANEL_H

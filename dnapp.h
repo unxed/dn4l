@@ -83,38 +83,34 @@
 #ifndef DNAPP_H
 #define DNAPP_H
 
-// Core Application and Event system
 #define Uses_TApplication
 #define Uses_TEvent
 #define Uses_TRect
 #define Uses_TDeskTop
-
-// Menu System Components (ensure full definitions for operator+)
 #define Uses_TMenuBar
-#define Uses_TMenu       
-#define Uses_TMenuItem   
-#define Uses_TSubMenu    
-
-// Status Line Components (ensure full definitions for operator+)
+#define Uses_TMenu
+#define Uses_TMenuItem
+#define Uses_TSubMenu
 #define Uses_TStatusLine
-#define Uses_TStatusDef  
-#define Uses_TStatusItem 
-
-// Key constants
+#define Uses_TStatusDef
+#define Uses_TStatusItem
 #define Uses_TKeys
-
 #define Uses_MsgBox
 #include <tvision/tv.h>
-#include <sys/stat.h>
-
-
-class TDoublePanelWindow; 
 
 class TDNApp : public TApplication {
 public:
     TDNApp();
 
     void handleEvent(TEvent& event) override;
+
+    // Custom application commands. Using a specific range (e.g., 300+)
+    // avoids conflicts with standard Turbo Vision commands (cm...).
+    static constexpr uint16_t cmCreateDirectory = 307;
+
+private:
+    // These static methods are required by the TProgInit base class constructor.
+    // They are called by Turbo Vision to build the standard UI components.
     static TMenuBar* initMenuBar(TRect bounds);
     static TStatusLine* initStatusLine(TRect bounds);
     static TDeskTop* initDeskTop(TRect bounds);

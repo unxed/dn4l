@@ -81,126 +81,107 @@
 //////////////////////////////////////////////////////////////////////////
 
 #include "dnapp.h"
-#include "dblwnd.h" 
+#include "dblwnd.h"
 #include "flpanel.h"
 #include "dnlogger.h"
 
-#define Uses_TKeys // Still good practice here for static methods
+#include <filesystem>
+#include <system_error>
+#include <vector>
 
-const int cmMyQuit = cmQuit; 
-const int cmCreateDirectory = 307;
-
+// The TDNApp constructor delegates UI initialization to its base class, TProgInit,
+// by passing pointers to static factory functions.
 TDNApp::TDNApp() :
     TProgInit(&TDNApp::initStatusLine,
               &TDNApp::initMenuBar,
               &TDNApp::initDeskTop)
 {
-    logger.log("TDNApp constructor finished.");
+    Logger::getInstance().log("TDNApp constructor finished.");
 }
 
 TMenuBar* TDNApp::initMenuBar(TRect r) {
-    r.b.y = r.a.y + 1;
+    r.b.y = r.a.y + 1; // A menubar is one row high.
 
-    TSubMenu& fileMenu =
-        *new TSubMenu("~F~ile", kbAltH, hcNoContext); 
+    // Turbo Vision's menu system uses an unusual syntax where the '+' operator
+    // links TMenuItem objects into a chain. The TSubMenu or TMenuBar takes ownership
+    // of the entire chain of dynamically allocated TMenuItem objects.
+    // This is why `new TMenuItem(...)` is used without a corresponding `delete`.
+    auto& fileMenu =
+        *new TSubMenu("~F~ile", kbAltF);
 
-    fileMenu + 
-        *new TMenuItem("E~x~it", cmMyQuit, kbAltX, hcNoContext, "Alt+X"); 
-    
-    // Можно добавить подменю "Edit" для полноты
-    TSubMenu& editMenu =
-        *new TSubMenu("~E~dit", kbNoKey, hcNoContext); // kbNoKey, т.к. Alt+E может быть занят
-    
-    editMenu +
-        *new TMenuItem("~U~ndo",     cmUndo,  kbAltBack, hcNoContext, "Alt+BkSp") + // kbAltBack - обычный Undo
-        newLine() +
-        *new TMenuItem("Cu~t~",      cmCut,   kbShiftDel, hcNoContext, "Shift+Del") +
-        *new TMenuItem("~C~opy",     cmCopy,  kbCtrlIns, hcNoContext, "Ctrl+Ins") +
-        *new TMenuItem("~P~aste",    cmPaste, kbShiftIns, hcNoContext, "Shift+Ins") +
-        *new TMenuItem("Cl~e~ar",    cmClear, kbDel, hcNoContext, "Del"); // kbDel как Clear, если нет выделения
-                                                                      // TEditor/TInputLine сами решат, что делать
+    fileMenu +
+        *new TMenuItem("E~x~it", cmQuit, kbAltX, hcNoContext, "Alt+X");
 
-    return new TMenuBar(r, fileMenu + editMenu); // Добавляем Edit в MenuBar
+    return new TMenuBar(r, fileMenu);
 }
 
 TStatusLine* TDNApp::initStatusLine(TRect r) {
-    r.a.y = r.b.y - 1;
+    r.a.y = r.b.y - 1; // A status line is one row high at the bottom of the screen.
+
+    // Similar to the menu bar, the TStatusLine takes ownership of the TStatusItem
+    // objects linked by the '+' operator.
     return new TStatusLine(r,
-        *new TStatusDef(0, 0xFFFF) + // Глобальный контекст для команд
-            *new TStatusItem("~Alt-X~ Exit", kbAltX, cmMyQuit) +
-            *new TStatusItem(nullptr, kbF10, cmMenu) +
+        *new TStatusDef(0, 0xFFFF) +
+            *new TStatusItem("~Alt-X~ Exit", kbAltX, cmQuit) +
             *new TStatusItem("~F7~ MkDir", kbF7, cmCreateDirectory) +
-            *new TStatusItem("~Alt-A~ MkDir", kbAltA, cmCreateDirectory) +
-            // Стандартные команды редактирования (не обязательно отображать текст,
-            // но сочетания клавиш будут работать)
-            *new TStatusItem(nullptr, kbShiftDel, cmCut) +    // Shift+Del для Cut
-            *new TStatusItem(nullptr, kbCtrlIns,  cmCopy) +   // Ctrl+Ins для Copy
-            *new TStatusItem(nullptr, kbShiftIns, cmPaste) +  // Shift+Ins для Paste
-            *new TStatusItem(nullptr, kbAltBack,  cmUndo)     // Alt+Backspace для Undo (стандарт TV)
-        );
+            *new TStatusItem("~Alt+A~ MkDir", kbAltA, cmCreateDirectory)
+    );
 }
 
 TDeskTop* TDNApp::initDeskTop(TRect r) {
-    TDeskTop *deskTop = new TDeskTop(r);
-    if (deskTop) {
-        TDoublePanelWindow *dblPanelWindow = new TDoublePanelWindow(deskTop->getExtent(), "DN3L C++ Prototype", 0);
-        if (dblPanelWindow) {
-            deskTop->insert(dblPanelWindow);
-        } else {
-             logger.log("Failed to create TDoublePanelWindow");
-        }
-    } else {
-        logger.log("Failed to create TDeskTop");
-    }
+    // The desktop is the main area where windows are placed.
+    auto* deskTop = new TDeskTop(r);
+
+    // Create and insert the main application window.
+    // The desktop takes ownership of this window.
+    auto* dblPanelWindow = new TDoublePanelWindow(deskTop->getExtent(), "dn4l C++", 0);
+    deskTop->insert(dblPanelWindow);
+
     return deskTop;
 }
 
-
 void TDNApp::handleEvent(TEvent& event) {
-    TApplication::handleEvent(event); 
-    if (event.what == evKeyDown && event.keyDown.keyCode == kbAltX) { 
-        if (valid(cmMyQuit)) { 
-            endModal(cmMyQuit);
-            clearEvent(event);
-        }
-    } else if (event.what == evCommand) {
+    // First, let the base class handle standard events (like cmQuit).
+    TApplication::handleEvent(event);
+
+    if (event.what == evCommand) {
         switch (event.message.command) {
             case cmCreateDirectory:
-                {
-                    TView* currentWindow = deskTop ? deskTop->current : nullptr;
-                    TDoublePanelWindow* dblWin = dynamic_cast<TDoublePanelWindow*>(currentWindow);
-                    TFilePanel* activePanel = nullptr;
+            {
+                // Find the currently active TFilePanel.
+                // We need to drill down from the desktop to the focused panel.
+                auto* dblWin = dynamic_cast<TDoublePanelWindow*>(deskTop->current);
+                if (!dblWin) break;
 
-                    if (dblWin) {
-                        activePanel = dynamic_cast<TFilePanel*>(dblWin->current);
-                    }
-                    
-                    if (activePanel) {
-                        char dirName[FILENAME_MAX] = "";
-                        if (inputBox("Create Directory", "Enter directory name:", dirName, FILENAME_MAX - 1) == cmOK) {
-                            if (strlen(dirName) > 0) {
-                                std::string newDirPath = activePanel->currentPath + std::string(dirName);
-                                logger.log("Attempting to create directory:", newDirPath);
-                                #ifdef _WIN32
-                                    if (_mkdir(newDirPath.c_str()) == 0) {
-                                #else
-                                    // S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH  (0775)
-                                    if (mkdir(newDirPath.c_str(), 0775) == 0) { 
-                                #endif
-                                    logger.log("Directory created successfully:", newDirPath);
-                                    activePanel->loadDirectory(activePanel->currentPath); // Refresh panel
-                                } else {
-                                    logger.log("Failed to create directory:", newDirPath);
-                                    messageBox(std::string("Failed to create directory: " + newDirPath).c_str(), mfError | mfOKButton);
-                                }
-                            }
-                        }
-                    } else {
-                         messageBox("No active panel to create directory in.", mfError | mfOKButton);
-                    }
-                    clearEvent(event);
+                auto* activePanel = dynamic_cast<TFilePanel*>(dblWin->current);
+                if (!activePanel) {
+                    messageBox("No active file panel.", mfError | mfOKButton);
+                    break;
                 }
+
+                // Use a std::vector as a buffer for the C-style API of inputBox.
+                std::vector<char> dirName(256, '\0');
+                if (inputBox("Create Directory", "Enter directory name:", dirName.data(), dirName.size() - 1) == cmOK) {
+                    std::string nameStr(dirName.data()); // Create string from null-terminated buffer.
+                    if (!nameStr.empty()) {
+                        auto newDirPath = activePanel->getCurrentPath() / nameStr;
+                        Logger::getInstance().log("Attempting to create directory", newDirPath.string());
+
+                        std::error_code ec;
+                        if (std::filesystem::create_directory(newDirPath, ec)) {
+                            Logger::getInstance().log("Directory created successfully");
+                            activePanel->loadDirectory(activePanel->getCurrentPath()); // Refresh panel
+                        } else {
+                            Logger::getInstance().log("Failed to create directory", ec.message());
+                            messageBox(std::format("Error: {}", ec.message()), mfError | mfOKButton);
+                        }
+                    }
+                }
+                clearEvent(event); // We've handled this command.
                 break;
             }
+            default:
+                break;
         }
+    }
 }

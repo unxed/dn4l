@@ -81,134 +81,77 @@
 //////////////////////////////////////////////////////////////////////////
 
 #include "dblwnd.h"
-#include "flpanel.h" 
+#include "flpanel.h"
 #include "dnlogger.h"
 
-// #define Uses_TDrawBuffer // Already in .h
-// #include <tvision/tv.h> // Already in dblwnd.h
-
 TDoublePanelWindow::TDoublePanelWindow(const TRect& bounds, TStringView title, short number)
-    : TWindowInit(&TDoublePanelWindow::initFrame), TWindow(bounds, title, number),
-      leftPanel(nullptr), rightPanel(nullptr)
+    : TWindowInit(&TDoublePanelWindow::initFrame), TWindow(bounds, title, number)
 {
-    logger.log("--------------------------------------------------");
-    logger.log("TDoublePanelWindow::TDoublePanelWindow starting...");
-    logger.log("Initial Bounds for TDoublePanelWindow", bounds);
-    logger.log("Title", title);
-    logger.log("Window Number", (int)number); 
+    Logger::getInstance().log("TDoublePanelWindow constructor starting...");
+    Logger::getInstance().log("Initial Bounds", bounds);
 
-    flags |= wfGrow; 
-    options |= ofSelectable; 
+    // Standard window flags. wfGrow allows the window to be resized.
+    flags |= wfGrow;
+    // Allow this window to be selectable within the desktop.
+    options |= ofSelectable;
 
-    TRect clientR = getExtent(); // This is the client area, inside the window frame.
-    logger.log("TDoublePanelWindow ClientRect (clientR from getExtent())", clientR);
+    TRect r = getExtent();
+    Logger::getInstance().log("Client Area (getExtent)", r);
 
-    if (clientR.b.x <= clientR.a.x || clientR.b.y <= clientR.a.y) {
-        logger.log("WARNING: TDoublePanelWindow ClientRect has zero or negative size!", clientR);
-    }
-    
-    // Dimensions of the client area
-    int clientWidth = clientR.b.x - clientR.a.x;
-    int clientHeight = clientR.b.y - clientR.a.y;
-    
-    // Width for each panel, reserving 1 column for the divider
-    int panelWidth = (clientWidth > 0) ? (clientWidth) / 2 : 0; 
-    int rightPanelX = panelWidth + 1; // X-coordinate where the right panel (or its frame) starts
-    // The width of the right panel might be slightly different if clientWidth-1 is odd
-    int rightPanelContentWidth = clientWidth - rightPanelX; 
-    if (rightPanelContentWidth < 0) rightPanelContentWidth = 0;
+    // The divider is positioned exactly in the middle.
+    // Note: On odd widths, the left panel will be one column narrower.
+    int panelWidth = (r.b.x - r.a.x) / 2;
+    int dividerX = r.a.x + panelWidth;
 
-    logger.log("clientWidth", clientWidth);
-    logger.log("clientHeight", clientHeight);
-    logger.log("panelWidth (for left panel content)", panelWidth);
-    logger.log("rightPanelX", rightPanelX);
-    logger.log("rightPanelContentWidth", rightPanelContentWidth);
+    // Create the left panel. Its coordinates are relative to the window's client area.
+    TRect leftRect = {r.a.x + 1, r.a.y + 2, dividerX - 1, r.b.y - 2};
+    leftPanel = new TFilePanel(leftRect);
+    // 'insert' adds the view as a child and transfers ownership to this TWindow.
+    insert(leftPanel);
 
-    TRect panelBounds; // Used to set bounds for panels
+    // Create the right panel.
+    TRect rightRect = {dividerX + 2, r.a.y + 2, r.b.x - 1, r.b.y - 2};
+    rightPanel = new TFilePanel(rightRect);
+    insert(rightPanel);
 
-    // Left Panel
-    // Coordinates are relative to the TDoublePanelWindow's client area (which effectively starts at 0,0)
-    panelBounds.a.x = 1; 
-    panelBounds.a.y = 2;
-    panelBounds.b.x = panelWidth;       // Panel extends up to (but not including) the divider
-    panelBounds.b.y = clientHeight - 2; 
-    logger.log("Calculated Bounds for LeftPanel (panelBounds)", panelBounds);
-    if (panelWidth > 0 && clientHeight > 0) {
-        leftPanel = new TFilePanel(panelBounds);
-        if (leftPanel) {
-            insert(leftPanel);
-        } else {
-            logger.log("LeftPanel FAILED to create.");
-        }
-    } else {
-        logger.log("LeftPanel not created due to zero/negative dimensions.");
-    }
+    // Set the initial focus to one of the panels.
+    rightPanel->select();
 
-    // Right Panel
-    panelBounds.a.x = rightPanelX;    // Starts after the divider
-    panelBounds.a.y = 2;
-    panelBounds.b.x = clientWidth - 1;    // Extends to the right edge of the client area
-    panelBounds.b.y = clientHeight - 2;
-    logger.log("Calculated Bounds for RightPanel (panelBounds)", panelBounds);
-     if (rightPanelContentWidth > 0 && clientHeight > 0) {
-        rightPanel = new TFilePanel(panelBounds);
-        if (rightPanel) {
-            insert(rightPanel);
-        } else {
-            logger.log("RightPanel FAILED to create.");
-        }
-    } else {
-        logger.log("RightPanel not created due to zero/negative dimensions.");
-    }
-
-    if (rightPanel) {
-        rightPanel->select(); 
-    } else if (leftPanel) {
-        leftPanel->select(); 
-    }
-
-    logger.log("TDoublePanelWindow::TDoublePanelWindow finished.");
-    logger.log("--------------------------------------------------");
-}
-
-TDoublePanelWindow::~TDoublePanelWindow() {
+    Logger::getInstance().log("TDoublePanelWindow constructor finished.");
 }
 
 void TDoublePanelWindow::draw() {
-    TWindow::draw(); // Draws the window frame and clears its client area
+    // First, let the base TWindow draw its frame and background.
+    TWindow::draw();
 
-    // Draw the divider if both panels exist and there's space
-    TRect clientR = getExtent();
-    int clientHeight = clientR.b.y - clientR.a.y;
-    int clientWidth = clientR.b.x - clientR.a.x;
+    // Now, draw the vertical divider between the panels.
+    TRect r = getExtent();
+    int dividerX = (r.b.x - r.a.x) / 2;
 
-    if (leftPanel && rightPanel && clientWidth > 1 && clientHeight > 0) {
-        TDrawBuffer b;
-        TColorAttr dividerColor = getColor(1); // Use window's frame passive color (palette index 1 for TWindow)
-        
-        int dividerX = leftPanel->size.x + 1; // X-coordinate of the divider, relative to client area
+    TDrawBuffer b;
+    // Using a Unicode box-drawing character for a cleaner look.
+    // Ensure the terminal supports UTF-8. 0xB3 is the CP437 equivalent.
+    static constexpr const char* BORDER_VERTICAL = "│";
+    b.moveStr(0, BORDER_VERTICAL, getColor(1));
 
-        for (int y = 0; y < clientHeight; ++y) {
-            //FRAME_VLINE is '\xB3'
-            b.moveChar(0, (char)0xB3, dividerColor, 1); // Prepare a single char in the buffer
-            writeLine(dividerX, y, 1, 1, b); // Draw it at (dividerX, y)
-        }
+    for (int y = r.a.y; y < r.b.y; ++y) {
+        writeLine(dividerX, y, 1, 1, b);
     }
 }
 
 void TDoublePanelWindow::handleEvent(TEvent& event) {
-    TWindow::handleEvent(event); 
+    // Always call the base class handler first.
+    TWindow::handleEvent(event);
 
+    // Custom event handling for this window type.
     if (event.what == evKeyDown && event.keyDown.keyCode == kbTab) {
-        if (current == leftPanel && rightPanel && (rightPanel->options & ofSelectable)) { // ensure target is selectable
+        // Toggle focus between the left and right panels.
+        if (current == leftPanel) {
             rightPanel->select();
-        } else if (current == rightPanel && leftPanel && (leftPanel->options & ofSelectable)) {
+        } else {
             leftPanel->select();
-        } else if (leftPanel && (leftPanel->options & ofSelectable)) { 
-            leftPanel->select();
-        } else if (rightPanel && (rightPanel->options & ofSelectable)) {
-            rightPanel->select();
         }
+        // We've handled the event, so clear it to prevent further processing.
         clearEvent(event);
     }
 }
