@@ -109,6 +109,8 @@ public:
     Logger(Logger&&) = delete;
     Logger& operator=(Logger&&) = delete;
 
+public:
+    Logger(const std::string& filePath = "dn4l.log");
     ~Logger();
 
     // Generic log function for simple string messages.
