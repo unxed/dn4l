@@ -228,6 +228,9 @@ void TFilePanel::handleEvent(TEvent& event) {
 
     if (event.what == evKeyDown && (state & sfFocused)) {
         switch (event.keyDown.keyCode) {
+            case kbCtrlEnter:
+                messageBox("Ctrl+Enter pressed", mfOKButton);
+                break;
             case kbUp:
                 setFocusedIndex(focusedItemIndex - 1);
                 clearEvent(event);

@@ -123,7 +123,8 @@ TStatusLine* TDNApp::initStatusLine(TRect r) {
     return new TStatusLine(r,
         *new TStatusDef(0, 0xFFFF) +
             *new TStatusItem("~Alt-X~ Exit", kbAltX, cmQuit) +
-            *new TStatusItem("~F7~ MkDir", kbF7, cmCreateDirectory)
+            *new TStatusItem("~F7~ MkDir", kbF7, cmCreateDirectory) +
+            *new TStatusItem("~Alt+A~ MkDir", kbAltA, cmCreateDirectory)
     );
 }
 
