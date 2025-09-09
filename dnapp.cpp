@@ -130,6 +130,7 @@ TStatusLine* TDNApp::initStatusLine(TRect r) {
             *new TStatusItem("~Alt-X~ Exit", kbAltX, cmMyQuit) +
             *new TStatusItem(nullptr, kbF10, cmMenu) +
             *new TStatusItem("~F7~ MkDir", kbF7, cmCreateDirectory) +
+            *new TStatusItem("~Alt-A~ MkDir", kbAltA, cmCreateDirectory) +
             // Стандартные команды редактирования (не обязательно отображать текст,
             // но сочетания клавиш будут работать)
             *new TStatusItem(nullptr, kbShiftDel, cmCut) +    // Shift+Del для Cut
