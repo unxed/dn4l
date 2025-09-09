@@ -85,39 +85,64 @@
 
 #include <string>
 #include <fstream>
-#include <tvision/tv.h> // For TRect, TPoint
+#include <format>
+#include <source_location>
+#include <tvision/tv.h>
 
-// Forward declaration
+// Forward-declarations of Turbo Vision types used in logging functions.
+// This avoids pulling in their full definitions into this header.
 class TPoint;
 class TRect;
 
 class Logger {
-private:
-    std::ofstream logFile;
-    bool initialized;
-    std::string logFilePath;
-    bool openFileError;
-
-    void openLogFile();
-    std::string getTimestamp();
-
 public:
-    Logger(const std::string& filePath = "dn4l.log");
+    // Meyers' Singleton: The single instance is created on first access.
+    // This is thread-safe since C++11.
+    static Logger& getInstance() {
+        static Logger instance("dn4l.log");
+        return instance;
+    }
+
+    // Deleted copy and move constructors/assignments to enforce singleton pattern.
+    Logger(const Logger&) = delete;
+    Logger& operator=(const Logger&) = delete;
+    Logger(Logger&&) = delete;
+    Logger& operator=(Logger&&) = delete;
+
     ~Logger();
 
+    // Generic log function for simple string messages.
     void log(const std::string& message);
+
+    // Overloaded log functions for key-value pairs of various types.
+    // C++20's std::format is used for type-safe and efficient formatting.
+    template <typename T>
+    void log(const std::string& key, const T& value) {
+        if (!initialized) openLogFile();
+        if (initialized) {
+            logFile << getTimestamp() << ": " << std::format("{}: {}", key, value) << std::endl;
+        }
+    }
+
+    // Specializations for types that don't have a default std::formatter.
     void log(const std::string& key, const std::string& value);
-    void log(const std::string& key, const TStringView& value); // For TV types
-    void log(const std::string& key, int value);
-    void log(const std::string& key, unsigned int value);
-    void log(const std::string& key, long value);
-    void log(const std::string& key, unsigned long value);
+    void log(const std::string& key, const TStringView& value);
     void log(const std::string& key, bool value);
     void log(const std::string& key, const void* ptr);
     void log(const std::string& key, const TRect& r);
     void log(const std::string& key, const TPoint& p);
-};
 
-extern Logger logger; // Global logger instance
+private:
+    // Private constructor to prevent direct instantiation.
+    explicit Logger(const std::string& filePath);
+
+    void openLogFile();
+    std::string getTimestamp();
+
+    std::ofstream logFile;
+    bool initialized;
+    std::string logFilePath;
+    bool openFileError;
+};
 
 #endif // DNLOGGER_H

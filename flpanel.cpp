@@ -83,340 +83,164 @@
 #include "flpanel.h"
 #include "dnlogger.h"
 
-#include <algorithm> 
-#include <cstring>   
-#include <sys/stat.h> 
-
-#include <tvision/compat/borland/dir.h>
-#include <tvision/compat/borland/dos.h>
-
-
-#ifndef _WIN32
-#include <unistd.h>   
-#include <dirent.h>   
-#else
-#include <direct.h>   
-#define getcwd _getcwd 
-#endif
-
-
-TFileListItem::TFileListItem(const std::string& name, bool isDir)
-    : fileName(name), isDirectory(isDir) {}
-
-TFileListCollection::TFileListCollection(ccIndex aLimit, ccIndex aDelta)
-    : TCollection(aLimit, aDelta) {}
-
-TFileListCollection::~TFileListCollection() {
-    for (ccIndex i = 0; i < getCount(); ++i) {
-        delete static_cast<TFileListItem*>(items[i]); 
-    }
-    removeAll();
-}
-
-char TFilePanel::getPathSeparator() {
-#ifdef _WIN32
-    return '\\';
-#else
-    return '/';
-#endif
-}
-
-std::string TFilePanel::ensureTrailingSeparator(const std::string& path) {
-    if (path.empty()) return std::string(1, getPathSeparator()); // Avoid empty paths becoming just sep
-    if (path.back() == getPathSeparator()) {
-        return path;
-    }
-    return path + getPathSeparator();
-}
-
-std::string TFilePanel::getParentPath(const std::string& path_orig) {
-    if (path_orig.empty()) return "."; // Or handle error
-    std::string path = path_orig;
-    char sep = getPathSeparator();
-
-    // Normalize: remove trailing separator unless it's a root like "C:\" or "/"
-    if (path.length() > 1 && path.back() == sep) {
-        bool isDriveRoot = (path.length() == 3 && path[1] == ':');
-        bool isUnixRoot = (path.length() == 1 && path[0] == sep);
-        if (!isDriveRoot && !isUnixRoot) {
-            path.pop_back();
-        }
-    }
-    // After pop_back, if path became "C:", it's a root, return "C:\"
-    if (path.length() == 2 && path[1] == ':') {
-        return ensureTrailingSeparator(path);
-    }
-    // If path became "" (was "/"), it's root, return "/"
-    if (path.empty() && path_orig.length() == 1 && path_orig[0] == sep) {
-        return path_orig;
-    }
-    if (path.empty()) return "."; // Was just a filename, parent is current dir
-
-    size_t lastSep = path.find_last_of(sep);
-    if (lastSep == std::string::npos) return "."; // No separator, must be a filename in current dir
-
-    if (lastSep == 0) { // Path was like "/file"
-        return std::string(1, sep); // Parent is "/"
-    }
-    // Path was like "C:\file" or "/dir/file"
-    // For "C:\file", substr(0, 3) -> "C:\"
-    // For "/dir/file", substr(0, lastSep)
-    if (path.length() > 2 && path[1] == ':' && lastSep == 2) { // "C:\file"
-        return path.substr(0, lastSep + 1);
-    }
-    return path.substr(0, lastSep);
-}
-
-
-std::string TFilePanel::getBaseName(const std::string& path_orig) {
-    if (path_orig.empty()) return "";
-    std::string path = path_orig;
-    char sep = getPathSeparator();
-
-    if (path.length() > 1 && path.back() == sep) {
-         bool isDriveRoot = (path.length() == 3 && path[1] == ':');
-         bool isUnixRoot = (path.length() == 1 && path[0] == sep);
-         if (!isDriveRoot && !isUnixRoot) {
-            path.pop_back();
-         }
-    }
-    size_t lastSep = path.find_last_of(sep);
-    if (lastSep == std::string::npos) return path;
-    return path.substr(lastSep + 1);
-}
-
-bool TFilePanel::directoryExists(const std::string& path) {
-    struct stat info;
-    if (stat(path.c_str(), &info) != 0)
-        return false;
-    return (info.st_mode & S_IFDIR) != 0;
-}
-
+#include <algorithm>
+#include <system_error>
+#include <ranges> // For C++20 ranges algorithms
 
 TFilePanel::TFilePanel(const TRect& bounds) : TGroup(bounds) {
-    logger.log("  TFilePanel::TFilePanel starting...");
-    logger.log("  Initial Bounds for TFilePanel", bounds);
+    Logger::getInstance().log("TFilePanel constructor starting...", bounds);
 
-    options |= ofFramed | ofBuffered | ofFirstClick; 
-    state &= ~sfCursorVis;    
+    // Standard options for a framed, clickable, and buffered view.
+    options |= ofFramed | ofBuffered | ofFirstClick;
+    growMode = gfGrowAll; // The panel will grow/shrink with its parent window.
+    eventMask |= evKeyDown; // We want to receive keyboard events.
 
-    growMode = gfGrowAll;
-    eventMask |= evKeyDown;
-
-    fileList = new TFileListCollection(50, 20); 
-    focusedItemIndex = 0;
-    topItemIndex = 0;
-
-    char tempPathCwd[FILENAME_MAX];
-    if (getcwd(tempPathCwd, sizeof(tempPathCwd)) != nullptr) {
-        currentPath = tempPathCwd;
-    } else {
-        currentPath = "."; 
+    std::error_code ec;
+    auto initialPath = std::filesystem::current_path(ec);
+    if (ec) {
+        Logger::getInstance().log("TFilePanel: Failed to get current path", ec.message());
+        initialPath = "."; // Fallback to current directory.
     }
-    currentPath = ensureTrailingSeparator(currentPath);
-    loadDirectory(currentPath);
+    loadDirectory(initialPath);
 
-    logger.log("  TFilePanel::TFilePanel finished. Options", (unsigned int)options);
-}
-
-TFilePanel::~TFilePanel() {
-    logger.log("  TFilePanel::~TFilePanel starting for panel at", origin);
-    if (fileList) {
-        delete fileList; 
-        fileList = nullptr;
-    }
-    logger.log("  TFilePanel::~TFilePanel finished for panel at", origin);
+    Logger::getInstance().log("TFilePanel constructor finished.");
 }
 
 void TFilePanel::setState(ushort aState, Boolean enable) {
     TGroup::setState(aState, enable);
-    if ((aState & (sfSelected | sfActive | sfFocused)) != 0) { 
+    // Redraw the view whenever its focus or selection state changes to update colors.
+    if (aState & (sfSelected | sfActive | sfFocused)) {
         drawView();
     }
 }
 
+void TFilePanel::loadDirectory(const std::filesystem::path& path) {
+    Logger::getInstance().log("TFilePanel::loadDirectory", path.string());
 
-void TFilePanel::loadDirectory(const std::string& path) {
-    std::string expandedPath = path; 
-    
-    logger.log("  TFilePanel::loadDirectory: Loading path", expandedPath);
+    fileList.clear(); // unique_ptr destructors are called automatically.
+    currentPath = std::filesystem::absolute(path);
+    currentPath.make_preferred(); // Use native path separators (e.g., '\' on Windows).
 
-    if (!fileList) { 
-        fileList = new TFileListCollection(50, 20);
+    // Add a ".." entry to navigate to the parent directory, unless we are at the root.
+    if (currentPath.has_parent_path()) {
+        fileList.push_back(std::make_unique<FileEntry>("..", FileEntryType::Directory));
     }
-    
-    for (ccIndex i = 0; i < fileList->getCount(); ++i) {
-        delete static_cast<TFileListItem*>(fileList->at(i));
+
+    std::vector<std::unique_ptr<FileEntry>> dirs;
+    std::vector<std::unique_ptr<FileEntry>> files;
+
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(currentPath, ec)) {
+        if (entry.is_directory(ec)) {
+            dirs.push_back(std::make_unique<FileEntry>(entry.path().filename(), FileEntryType::Directory));
+        } else if (entry.is_regular_file(ec)) {
+            files.push_back(std::make_unique<FileEntry>(entry.path().filename(), FileEntryType::File));
+        }
     }
-    fileList->removeAll();
 
-    currentPath = ensureTrailingSeparator(expandedPath); // Set currentPath before checking existence
+    if (ec) {
+        Logger::getInstance().log("TFilePanel: Error iterating directory", ec.message());
+    }
 
-    if (!directoryExists(currentPath)) {
-        logger.log("  TFilePanel::loadDirectory: Path does not exist or is not a directory", currentPath);
-        fileList->insert(new TFileListItem("<Path not found: " + currentPath + ">", false));
-        // currentPath is already set
+    // Sort directories and files alphabetically using C++20 ranges and a projection.
+    // A projection extracts a "key" from each object for comparison.
+    auto pathProjection = [](const auto& entry) -> const auto& { return entry->path; };
+    std::ranges::sort(dirs, {}, pathProjection);
+    std::ranges::sort(files, {}, pathProjection);
+
+    // Combine the sorted lists: parent (".."), then directories, then files.
+    fileList.insert(fileList.end(), std::make_move_iterator(dirs.begin()), std::make_move_iterator(dirs.end()));
+    fileList.insert(fileList.end(), std::make_move_iterator(files.begin()), std::make_move_iterator(files.end()));
+
+    Logger::getInstance().log("TFilePanel: Found items", fileList.size());
+    setFocusedIndex(0); // Focus the first item in the new list.
+}
+
+void TFilePanel::setFocusedIndex(size_t newIndex) {
+    if (fileList.empty()) {
         focusedItemIndex = 0;
         topItemIndex = 0;
-        if (getState(sfVisible)) drawView();
-        return;
-    }
-    
-    bool isRoot = false;
-    char sep = getPathSeparator();
-
-    // More robust isRoot check
-    if (currentPath.length() == 1 && currentPath[0] == sep) { // Unix root "/"
-        isRoot = true;
-    } else if (currentPath.length() == 3 && currentPath[1] == ':' && currentPath[2] == sep) { // Windows root "C:\"
-        isRoot = true;
-    } else if (currentPath.length() == 2 && currentPath[1] == ':') { // Windows drive "C:" (no trailing slash)
-        isRoot = true; 
-    }
-
-
-    if (!isRoot) {
-        fileList->insert(new TFileListItem("..", true));
-    }
-
-    ffblk sr; 
-    std::string searchPattern = currentPath + "*"; 
-
-    if (findfirst(searchPattern.c_str(), &sr, FA_RDONLY | FA_HIDDEN | FA_SYSTEM | FA_DIREC | FA_ARCH) == 0) {
-        do {
-            std::string itemName = sr.ff_name;
-            if (itemName != "." && itemName != "..") {
-                bool isDir = (sr.ff_attrib & FA_DIREC) != 0;
-                fileList->insert(new TFileListItem(itemName, isDir));
-            }
-        } while (findnext(&sr) == 0);
-    } else {
-        logger.log("  TFilePanel::loadDirectory: findfirst failed for", searchPattern);
-        fileList->insert(new TFileListItem("<Error reading directory>", false));
-    }
-
-    setFocusIndex(0); // This will also handle topItemIndex and draw if visible
-
-    logger.log("  TFilePanel::loadDirectory: Found items", fileList->getCount());
-    // setFocusIndex will call drawView if visible
-}
-
-void TFilePanel::setFocusIndex(int newFocusIndex) {
-    if (!fileList || fileList->getCount() == 0) {
-        focusedItemIndex = 0;
-        topItemIndex = 0; // Reset top if list is empty
-        if (getState(sfVisible)) drawView();
         return;
     }
 
-    if (newFocusIndex < 0) {
-        focusedItemIndex = 0;
-    } else if (newFocusIndex >= fileList->getCount()) {
-        focusedItemIndex = fileList->getCount() - 1;
-    } else {
-        focusedItemIndex = newFocusIndex;
-    }
+    // Clamp the new index to be within the valid range of the file list.
+    focusedItemIndex = std::clamp(newIndex, size_t(0), fileList.size() - 1);
 
-    TRect extent = getExtent(); // Get client area dimensions
-    int clientHeight = extent.b.y - extent.a.y;
+    // Adjust the visible portion of the list (scrolling).
+    int clientHeight = size.y;
     if (clientHeight <= 0) clientHeight = 1;
 
-
     if (focusedItemIndex < topItemIndex) {
+        // Scroll up if focus moves above the visible area.
         topItemIndex = focusedItemIndex;
-    }
-    // If focused item is below the visible area
-    else if (focusedItemIndex >= topItemIndex + clientHeight) {
+    } else if (focusedItemIndex >= topItemIndex + clientHeight) {
+        // Scroll down if focus moves below the visible area.
         topItemIndex = focusedItemIndex - clientHeight + 1;
     }
-    if (topItemIndex < 0) topItemIndex = 0; 
 
-    if (getState(sfVisible)) drawView();
+    drawView(); // Redraw to reflect the change in focus/scrolling.
 }
 
-void TFilePanel::changeDirectory(const std::string& newPathFragment) {
-    std::string oldPath = currentPath;
-    std::string focusName;
+void TFilePanel::changeDirectory(const std::filesystem::path& newPathFragment) {
+    std::filesystem::path newPath;
+    std::string focusOnName; // Store the name of the directory we are leaving.
 
     if (newPathFragment == "..") {
-        char sep = getPathSeparator();
-        bool isUnixRoot = (oldPath.length() == 1 && oldPath[0] == sep);
-        bool isWindowsDriveRoot = (oldPath.length() == 3 && oldPath[1] == ':' && oldPath[2] == sep);
-        bool isWindowsDriveOnly = (oldPath.length() == 2 && oldPath[1] == ':');
-
-        if (!isUnixRoot && !isWindowsDriveRoot && !isWindowsDriveOnly) {
-            std::string tempOldPath = oldPath;
-            if (tempOldPath.length() > 1 && tempOldPath.back() == sep) {
-                 bool isTempDriveRoot = (tempOldPath.length() == 3 && tempOldPath[1] == ':');
-                 bool isTempUnixRoot = (tempOldPath.length() == 1 && tempOldPath[0] == sep);
-                 if (!isTempDriveRoot && !isTempUnixRoot) {
-                    tempOldPath.pop_back();
-                 }
-            }
-            focusName = getBaseName(tempOldPath);
-            std::string parent = getParentPath(oldPath);
-            loadDirectory(parent);
+        if (currentPath.has_parent_path()) {
+            focusOnName = currentPath.filename().string();
+            newPath = currentPath.parent_path();
+        } else {
+            return; // Already at root.
         }
     } else {
-        std::string fullNewPath = currentPath + newPathFragment;
-        fullNewPath = ensureTrailingSeparator(fullNewPath);
-        loadDirectory(fullNewPath);
+        newPath = currentPath / newPathFragment;
     }
 
-    if (!focusName.empty() && fileList) {
-        for (int i = 0; i < fileList->getCount(); ++i) {
-            if (fileList->at(i)->fileName == focusName) {
-                setFocusIndex(i);
-                return;
-            }
+    loadDirectory(newPath);
+
+    // After loading the new directory, try to set focus on the directory we just left.
+    if (!focusOnName.empty()) {
+        auto it = std::ranges::find_if(fileList, [&](const auto& entry) {
+            return entry->path.filename() == focusOnName;
+        });
+        if (it != fileList.end()) {
+            setFocusedIndex(std::distance(fileList.begin(), it));
         }
     }
-    // If focusName was empty (e.g. navigating into a dir) or not found,
-    // setFocusIndex(0) will be called by loadDirectory implicitly via its own setFocusIndex.
-    // No, loadDirectory calls setFocusIndex, which is what we want.
 }
 
 void TFilePanel::executeFocusedItem() {
-    if (!fileList || fileList->getCount() == 0 ||
-        focusedItemIndex < 0 || focusedItemIndex >= fileList->getCount()) {
-        return;
-    }
+    if (fileList.empty() || focusedItemIndex >= fileList.size()) return;
 
-    TFileListItem* item = fileList->at(focusedItemIndex);
-    if (!item) return;
+    const auto& item = fileList[focusedItemIndex];
+    Logger::getInstance().log("TFilePanel::executeFocusedItem", item->path.string());
 
-    logger.log("  TFilePanel::executeFocusedItem: Item", item->fileName);
-    logger.log("  TFilePanel::executeFocusedItem: IsDirectory", item->isDirectory);
-
-    if (item->isDirectory) {
-        changeDirectory(item->fileName);
+    if (item->type == FileEntryType::Directory) {
+        changeDirectory(item->path);
     } else {
-        logger.log("  TFilePanel::executeFocusedItem: Attempting to \"open\" file", item->fileName);
+        // TODO: Implement file execution/viewing logic.
+        Logger::getInstance().log("File execution is not yet implemented.");
     }
 }
 
 void TFilePanel::handleEvent(TEvent& event) {
     TGroup::handleEvent(event);
 
-    if (event.what == evKeyDown && (state & sfFocused)) { 
+    if (event.what == evKeyDown && (state & sfFocused)) {
         switch (event.keyDown.keyCode) {
-            case kbCtrlEnter:
-                messageBox("Ctrl+Enter pressed", mfOKButton );
-                break;
             case kbUp:
-                setFocusIndex(focusedItemIndex - 1);
+                setFocusedIndex(focusedItemIndex - 1);
                 clearEvent(event);
                 break;
             case kbDown:
-                setFocusIndex(focusedItemIndex + 1);
+                setFocusedIndex(focusedItemIndex + 1);
                 clearEvent(event);
                 break;
             case kbEnter:
                 executeFocusedItem();
                 clearEvent(event);
                 break;
-            case kbCtrlPgUp: 
-            case kbCtrlBack: 
+            case kbCtrlPgUp: // Common shortcut for parent directory
                 changeDirectory("..");
                 clearEvent(event);
                 break;
@@ -424,81 +248,36 @@ void TFilePanel::handleEvent(TEvent& event) {
     }
 }
 
+void TFilePanel::drawItem(int y_in_client_area, size_t list_index, bool isFocused, TDrawBuffer& b) {
+    // Determine color based on focus state.
+    TColorAttr color = (isFocused && (state & sfFocused)) ? getColor(4) : getColor(1);
 
-void TFilePanel::drawItem(int y_in_client_area, int list_index, bool isFocusedOnItem, TDrawBuffer& b) {
-    TColorAttr color;
-    TRect extent = getExtent(); // Client area rect { (0,0), (innerWidth, innerHeight) }
-    int nameWidth = extent.b.x - extent.a.x;
-    if (nameWidth <=0) return;
+    b.moveChar(0, ' ', color, size.x); // Clear the line with the correct background color.
 
-    // Check if this panel (TFilePanel instance) is the currently focused view in its owner
-    if (isFocusedOnItem && (state & sfFocused) ) { 
-        color = getColor(4); // Use palette index 4 (0-based) for focused item
-    } else {
-        color = getColor(1); // Normal item
-    }
+    if (list_index < fileList.size()) {
+        const auto& item = fileList[list_index];
+        std::string displayName = item->path.string();
 
-    b.moveChar(0, ' ', color, nameWidth); 
-
-    if (fileList && list_index >= 0 && list_index < fileList->getCount()) {
-        TFileListItem* item = fileList->at(list_index);
-        if (item) {
-            std::string displayName = item->fileName;
-            if (item->isDirectory) {
-                displayName = "[" + displayName + "]";
-            }
-
-            // Truncate displayName if it's too long for nameWidth
-            // Ideally, use TText::scroll or similar for proper Unicode width truncation.
-            // For simplicity, using byte length.
-            if (displayName.length() > (size_t)nameWidth) {
-                 std::string tempDisplay;
-                 size_t currentDisplayWidth = 0;
-                 for (char c_char : displayName) {
-                     // This is a very rough approximation for width if not using TText
-                     if (currentDisplayWidth + 1 <= (size_t)nameWidth) {
-                         tempDisplay += c_char;
-                         currentDisplayWidth++; // Assume 1 char = 1 width for now
-                     } else {
-                         break;
-                     }
-                 }
-                 displayName = tempDisplay;
-            }
-            b.moveStr(0, TStringView(displayName.c_str(), displayName.length()), color);
+        static constexpr std::string_view DIR_PREFIX = "[";
+        static constexpr std::string_view DIR_SUFFIX = "]";
+        if (item->type == FileEntryType::Directory) {
+            displayName = std::format("{}{}{}", DIR_PREFIX, displayName, DIR_SUFFIX);
         }
+
+        // Use TStringView for efficient substring handling and writing to the buffer.
+        b.moveStr(0, TStringView(displayName), color);
     }
-    // writeLine coordinates are relative to the view passed to TView::writeLine.
-    // Here, 'this' (TFilePanel) is the view.
-    // Coordinates are relative to the TFilePanel's client area.
-    writeLine(0, y_in_client_area, nameWidth, 1, b);
+
+    writeLine(0, y_in_client_area, size.x, 1, b);
 }
 
 void TFilePanel::draw() {
-    TGroup::draw(); // This draws the frame if ofFramed is set for TFilePanel
+    TGroup::draw(); // Draw the frame first.
 
-    TRect extent = getExtent(); // This is the client area, INSIDE the frame.
-    int clientHeight = extent.b.y - extent.a.y; 
-    int clientWidth = extent.b.x - extent.a.x;  
-
-    if (clientWidth <= 0 || clientHeight <= 0) return;
-
-    TDrawBuffer b; 
-
-    for (int y_in_client = 0; y_in_client < clientHeight; ++y_in_client) {
-        int currentListIndex = topItemIndex + y_in_client;
-        if (fileList && currentListIndex >= 0 && currentListIndex < fileList->getCount()) {
-            // y_in_client is the Y coordinate *within the client area* of the panel
-            drawItem(y_in_client, currentListIndex, currentListIndex == focusedItemIndex, b);
-        } else {
-             b.moveChar(0, ' ', getColor(0x01), clientWidth);
-             // Coordinates for writeLine are relative to the TFilePanel's client area.
-             writeLine(0, y_in_client, clientWidth, 1, b);
-        }
+    TDrawBuffer b;
+    for (int y = 0; y < size.y; ++y) {
+        size_t currentListIndex = topItemIndex + y;
+        bool isFocused = (currentListIndex == focusedItemIndex);
+        drawItem(y, currentListIndex, isFocused, b);
     }
-}
-
-
-ushort TFilePanel::getHelpCtx() {
-    return hcNoContext; 
 }
