@@ -200,10 +200,18 @@ index df6ec79..66c70e2 100644
  // Pre: '\x1BP' has just been read.
  {
 diff --git a/source/platform/win32con.cpp b/source/platform/win32con.cpp
-index abed9d9..f1e4eee 100644
+index abed9d9..372a49f 100644
 --- a/source/platform/win32con.cpp
 +++ b/source/platform/win32con.cpp
-@@ -464,7 +464,54 @@ bool getWin32Key(const KEY_EVENT_RECORD &KeyEvent, TEvent &ev, InputState &state
+@@ -9,6 +9,7 @@
+ #include <internal/termio.h>
+ #include <internal/utf8.h>
+ #include <locale.h>
++#include <wctype.h>
+ 
+ namespace tvision
+ {
+@@ -464,7 +465,54 @@ bool getWin32Key(const KEY_EVENT_RECORD &KeyEvent, TEvent &ev, InputState &state
              // If the character cannot be represented in the current codepage,
              // or if it would accidentally trigger a Ctrl+Key combination,
              // make the whole keyCode zero to avoid side effects.
