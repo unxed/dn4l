@@ -1,0 +1,69 @@
+diff --git a/source/tvision/tfildlg.cpp b/source/tvision/tfildlg.cpp
+index 580d879..1615467 100644
+--- a/source/tvision/tfildlg.cpp
++++ b/source/tvision/tfildlg.cpp
+@@ -62,24 +62,29 @@ TFileDialog::TFileDialog( TStringView aWildCard,
+     flags |= wfGrow;
+     strnzcpy( wildCard, aWildCard, sizeof( wildCard ) );
+ 
+-    fileName = new TFileInputLine( TRect( 3, 3, 31, 4 ), MAXPATH );
+-    strnzcpy( fileName->data, wildCard, MAXPATH );
+-    insert( fileName );
+-    first()->growMode = gfGrowHiX;
++    insert( new TLabel( TRect( 2, 2, 8, 3 ), filesText, fileList ) );
++    first()->growMode = 0;
+ 
+-    insert( new TLabel( TRect( 2, 2, 3+cstrlen(inputName), 3 ),
++    TScrollBar *sb = new TScrollBar( TRect( 3, 11, 34, 12 ) );
++    insert( sb );
++    fileList = new TFileList( TRect( 3, 3, 34, 11 ), sb );
++    fileList->growMode = gfGrowHiX | gfGrowHiY;
++    insert( fileList );
++
++    insert( new TLabel( TRect( 2, 23, 3+cstrlen(inputName), 24 ),
+                         inputName,
+                         fileName
+                       ) );
+     first()->growMode = 0;
+-    insert( new THistory( TRect( 31, 3, 34, 4 ), fileName, histId ) );
++
++    fileName = new TFileInputLine( TRect( 3, 24, 31, 25 ), MAXPATH );
++    strnzcpy( fileName->data, wildCard, MAXPATH );
++    fileName->growMode = gfGrowHiX;
++    insert( fileName );
++    
++    insert( new THistory( TRect( 31, 24, 34, 25 ), fileName, histId ) );
+     first()->growMode = gfGrowLoX | gfGrowHiX;
+-    TScrollBar *sb = new TScrollBar( TRect( 3, 14, 34, 15 ) );
+-    insert( sb );
+-    insert( fileList = new TFileList( TRect( 3, 6, 34, 14 ), sb ) );
+-    first()->growMode = gfGrowHiX | gfGrowHiY;
+-    insert( new TLabel( TRect( 2, 5, 8, 6 ), filesText, fileList ) );
+-    first()->growMode = 0;
++
+     ushort opt = bfDefault;
+     TRect r( 35, 3, 46, 5 );
+ 
+diff --git a/source/tvision/tfilecol.cpp b/source/tvision/tfilecol.cpp
+index a7ebd21..62f2fe3 100644
+--- a/source/tvision/tfilecol.cpp
++++ b/source/tvision/tfilecol.cpp
+@@ -43,14 +43,14 @@ int TFileCollection::compare(void *key1, void *key2)
+         return 0;
+ 
+     if( strcmp( getName( key1 ), ".." ) == 0 )
+-        return 1;
+-    if( strcmp( getName( key2 ), ".." ) == 0 )
+         return -1;
++    if( strcmp( getName( key2 ), ".." ) == 0 )
++        return 1;
+ 
+     if( (attr( key1 ) & FA_DIREC) != 0 && (attr( key2 ) & FA_DIREC) == 0 )
+-        return 1;
+-    if( (attr( key2 ) & FA_DIREC) != 0 && (attr( key1 ) & FA_DIREC) == 0 )
+         return -1;
++    if( (attr( key2 ) & FA_DIREC) != 0 && (attr( key1 ) & FA_DIREC) == 0 )
++        return 1;
+ 
+     return strcmp( getName( key1 ), getName( key2 ) );
+ }
