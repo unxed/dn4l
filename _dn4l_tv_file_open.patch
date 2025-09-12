@@ -1,5 +1,19 @@
+diff --git a/include/tvision/stddlg.h b/include/tvision/stddlg.h
+index 7d2c4fc..f835774 100644
+--- a/include/tvision/stddlg.h
++++ b/include/tvision/stddlg.h
+@@ -276,6 +276,9 @@ public:
+     virtual void getData( void *rec );
+     virtual void setData( void *rec );
+ 
++    virtual void draw();
++    virtual TPalette& getPalette() const;
++
+     TFileCollection *list();
+ 
+ private:
 diff --git a/source/tvision/tfildlg.cpp b/source/tvision/tfildlg.cpp
-index 580d879..226e99b 100644
+index 580d879..8810178 100644
 --- a/source/tvision/tfildlg.cpp
 +++ b/source/tvision/tfildlg.cpp
 @@ -62,24 +62,29 @@ TFileDialog::TFileDialog( TStringView aWildCard,
@@ -44,15 +58,25 @@ index 580d879..226e99b 100644
      ushort opt = bfDefault;
      TRect r( 35, 3, 46, 5 );
  
-@@ -297,6 +302,7 @@ char drive[MAXDRIVE];
+@@ -257,6 +262,7 @@ void TFileDialog::readDirectory()
+ {
+     char curDir[MAXPATH];
+     getCurDir( curDir );
++    fexpand( curDir );
+     if( directory )
+         delete[] (char *) directory;
+     directory = newStr( curDir );
+@@ -297,6 +303,9 @@ char drive[MAXDRIVE];
  char dir[MAXDIR];
  char name[MAXFILE];
  char ext[MAXEXT];
 +char oldParent[MAXPATH];
++
++    oldParent[0] = '\0';
  
      if( command == 0 )
          return True;
-@@ -307,6 +313,21 @@ char ext[MAXEXT];
+@@ -307,6 +316,23 @@ char ext[MAXEXT];
              {
              getFileName( fName );
  
@@ -65,16 +89,18 @@ index 580d879..226e99b 100644
 +
 +            // p2 points to the beginning of the old parent folder name
 +            // copy until next '/'
-+            const char *end = strchr(p2, '/');
++            const char *end = strpbrk(p2, "/\\");
 +            if (!end) end = p2 + strlen(p2);
 +            size_t len = end - p2;
-+            strncpy(oldParent, p2, len);
-+            oldParent[len] = '\0';
++            if (len < MAXPATH) {
++                strncpy(oldParent, p2, len);
++                oldParent[len] = '\0';
++            }
 +
              if( isWild( fName ) )
                  {
                  fnsplit( fName, drive, dir, name, ext );
-@@ -322,6 +343,22 @@ char ext[MAXEXT];
+@@ -322,6 +348,21 @@ char ext[MAXEXT];
                      if( command != cmFileInit )
                          fileList->select();
                      fileList->readDirectory( directory, wildCard );
@@ -85,8 +111,7 @@ index 580d879..226e99b 100644
 +                        for (short i = 0; i < items->getCount(); i++)
 +                        {
 +                            TSearchRec *item = (TSearchRec *)items->at(i);
-+
-+                            if (stricmp(item->name, oldParent) == 0)
++                            if (item != nullptr && stricmp(item->name, oldParent) == 0)
 +                            {
 +                                fileList->focusItem(i);
 +                                break;
@@ -97,7 +122,7 @@ index 580d879..226e99b 100644
                      }
                  }
              else if( isDir( fName ) )
-@@ -334,6 +371,22 @@ char ext[MAXEXT];
+@@ -334,6 +375,21 @@ char ext[MAXEXT];
                      if( command != cmFileInit )
                          fileList->select();
                      fileList->readDirectory( directory, wildCard );
@@ -108,8 +133,7 @@ index 580d879..226e99b 100644
 +                        for (short i = 0; i < items->getCount(); i++)
 +                        {
 +                            TSearchRec *item = (TSearchRec *)items->at(i);
-+
-+                            if (stricmp(item->name, oldParent) == 0)
++                            if (item != nullptr && stricmp(item->name, oldParent) == 0)
 +                            {
 +                                fileList->focusItem(i);
 +                                break;
@@ -143,3 +167,159 @@ index a7ebd21..62f2fe3 100644
  
      return strcmp( getName( key1 ), getName( key2 ) );
  }
+diff --git a/source/tvision/tfillist.cpp b/source/tvision/tfillist.cpp
+index 9977921..01677c2 100644
+--- a/source/tvision/tfillist.cpp
++++ b/source/tvision/tfillist.cpp
+@@ -20,6 +20,7 @@
+ #define Uses_TEvent
+ #define Uses_TGroup
+ #define Uses_TKeys
++#define Uses_TScrollBar
+ #include <tvision/tv.h>
+ 
+ #if !defined( __DIR_H )
+@@ -71,6 +72,107 @@ TFileList::~TFileList()
+       destroy ( list() );
+ }
+ 
++#define cpFileList "\x1A\x1A\x1B\x1C\x1D\x1F"
++
++TPalette& TFileList::getPalette() const
++{
++    static TPalette palette( cpFileList, sizeof( cpFileList )-1 );
++    return palette;
++}
++
++void TFileList::draw()
++{
++    short i, j, item;
++    TColorAttr normalColor, selectedColor, focusedColor, dirColor, color;
++    short colWidth, curCol, indent;
++    TDrawBuffer b;
++    uchar scOff;
++    Boolean focusedVis;
++
++    if( (state&(sfSelected | sfActive)) == (sfSelected | sfActive))
++        {
++        normalColor = getColor(1);
++        focusedColor = getColor(3);
++        selectedColor = getColor(4);
++        dirColor = getColor(6);
++        }
++    else
++        {
++        normalColor = getColor(2);
++        selectedColor = getColor(4);
++        dirColor = getColor(6);
++        focusedColor = 0;
++        }
++
++    if( hScrollBar != 0 )
++        indent = hScrollBar->value;
++    else
++        indent = 0;
++
++    focusedVis = False;
++    colWidth = size.x / numCols + 1;
++    for( i = 0; i < size.y; i++ )
++        {
++        for( j = 0; j < numCols; j++ )
++            {
++            item =  j * size.y + i + topItem;
++            curCol = j * colWidth;
++            if( (state & (sfSelected | sfActive)) == (sfSelected | sfActive) &&
++                focused == item &&
++                range > 0)
++                {
++                color = focusedColor;
++                setCursor( curCol + 1, i );
++                scOff = 0;
++                focusedVis = True;
++                }
++            else if( item < range && isSelected(item) )
++                {
++                color = selectedColor;
++                scOff = 2;
++                }
++            else
++                {
++                color = normalColor;
++                if (item < range)
++                    {
++                    TSearchRec *f = (TSearchRec *)(list()->at(item));
++                    if ( (f->attr & FA_DIREC) != 0 )
++                        color = dirColor;
++                    }
++                scOff = 4;
++                }
++
++            b.moveChar( curCol, ' ', color, colWidth );
++            if( item < range )
++                {
++                if (indent < 255)
++                    {
++                    char text[256];
++                    getText( text, item, 255 );
++                    b.moveStr( curCol+1, text, color, colWidth, indent );
++                    }
++                if( showMarkers )
++                    {
++                    b.putChar( curCol, specialChars[scOff] );
++                    b.putChar( curCol+colWidth-2, specialChars[scOff+1] );
++                    }
++                }
++            else if( i == 0 && j == 0 )
++                {
++                static const char * const localEmptyText = "<empty>";
++                b.moveStr( curCol+1, localEmptyText, getColor(1) );
++                }
++
++            b.moveChar( curCol+colWidth-1, '\xB3', getColor(5), 1 );
++            }
++        writeLine( 0, i, size.x, 1, b );
++        }
++
++    if ( !focusedVis )
++        setCursor( -1, -1 );
++}
++
+ void TFileList::focusItem( short item )
+ {
+     TSortedListBox::focusItem( item );
+@@ -116,8 +218,8 @@ void TFileList::getText( char *dest, short item, short maxChars )
+ 
+     strncpy( dest, f->name, maxChars );
+     dest[maxChars] = '\0';
+-    if( f->attr & FA_DIREC )
+-        strcat( dest, "\\" );
++//    if( f->attr & FA_DIREC )
++//        strcat( dest, "\\" );
+ }
+ 
+ 
+diff --git a/source/tvision/tlstview.cpp b/source/tvision/tlstview.cpp
+index 9c1be22..160547a 100644
+--- a/source/tvision/tlstview.cpp
++++ b/source/tvision/tlstview.cpp
+@@ -313,16 +313,16 @@ void TListViewer::handleEvent( TEvent& event )
+                     newItem = focused - size.y * numCols;
+                     break;
+                 case kbHome:
+-                    newItem = topItem;
++                    newItem = 0;
+                     break;
+                 case kbEnd:
+-                    newItem = topItem + (size.y * numCols) - 1;
++                    newItem = range - 1;
+                     break;
+                 case kbCtrlPgDn:
+-                    newItem = range - 1;
++                    newItem = topItem + (size.y * numCols) - 1;
+                     break;
+                 case kbCtrlPgUp:
+-                    newItem = 0;
++                    newItem = topItem;
+                     break;
+                 default:
+                     return;
